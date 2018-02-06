@@ -1,6 +1,5 @@
 using System;
 using System.Threading.Tasks;
-using HostFilteringSample;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;

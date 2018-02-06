@@ -10,17 +10,26 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
 
-namespace HostFilteringSample
+namespace Microsoft.AspNetCore.HostFiltering
 {
     // A normal middleware would provide an options type, config binding, extension methods, etc..
     // This intentionally does all of the work inside of the middleware so it can be
     // easily copy-pasted into docs and other projects.
+    /// <summary>
+    /// 
+    /// </summary>
     public class HostFilteringMiddleware
     {
         private readonly RequestDelegate _next;
         private readonly IList<string> _hosts;
         private readonly ILogger<HostFilteringMiddleware> _logger;
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="next"></param>
+        /// <param name="config"></param>
+        /// <param name="logger"></param>
         public HostFilteringMiddleware(RequestDelegate next, IConfiguration config, ILogger<HostFilteringMiddleware> logger)
         {
             if (config == null)
@@ -40,6 +49,11 @@ namespace HostFilteringSample
             }
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="context"></param>
+        /// <returns></returns>
         public Task Invoke(HttpContext context)
         {
             if (!ValidateHost(context))

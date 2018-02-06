@@ -5,7 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\samples\HostFilteringSample\HostFilteringSample.csproj" />
+    <ProjectReference Include="..\..\src\Microsoft.AspNetCore.HostFiltering\Microsoft.AspNetCore.HostFiltering.csproj" />
   </ItemGroup>
 
 </Project>
