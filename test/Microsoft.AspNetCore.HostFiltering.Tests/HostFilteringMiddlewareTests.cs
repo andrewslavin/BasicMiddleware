@@ -94,10 +94,14 @@ namespace Microsoft.AspNetCore.HostFiltering
 
         [Theory]
         [InlineData("localHost", "localhost")]
+        [InlineData("localHost", "*")] // Any - Used by HttpSys
+        [InlineData("localHost", "[::]")] // IPv6 Any - This is what Kestrel reports when binding to *
+        [InlineData("localHost", "0.0.0.0")] // IPv4 Any
         [InlineData("localhost:9090", "example.com;localHost")]
         [InlineData("example.com:443", "example.com;localhost")]
         [InlineData("localHost:80", "localhost;")]
         [InlineData("foo.eXample.com:443", "*.exampLe.com")]
+        [InlineData("f.eXample.com:443", "*.exampLe.com")]
         [InlineData("127.0.0.1", "127.0.0.1")]
         [InlineData("127.0.0.1:443", "127.0.0.1")]
         [InlineData("[::ABC]", "[::aBc]")]
@@ -137,6 +141,7 @@ namespace Microsoft.AspNetCore.HostFiltering
         [InlineData(":80", "localhost")]
         [InlineData(":", "localhost")]
         [InlineData("example.com:443", "*.example.com")]
+        [InlineData(".example.com:443", "*.example.com")]
         [InlineData("foo.com:443", "*.example.com")]
         [InlineData("foo.example.com.bar:443", "*.example.com")]
         [InlineData(".com:443", "*.com")]
@@ -171,6 +176,9 @@ namespace Microsoft.AspNetCore.HostFiltering
 
         [Theory]
         [InlineData("localHost", "localhost")]
+        [InlineData("localHost", "*")] // Any - Used by HttpSys
+        [InlineData("localHost", "[::]")] // IPv6 Any - This is what Kestrel reports when binding to *
+        [InlineData("localHost", "0.0.0.0")] // IPv4 Any
         [InlineData("localhost:9090", "example.com;localHost")]
         [InlineData("example.com:443", "example.com;localhost")]
         [InlineData("localHost:80", "localhost;")]

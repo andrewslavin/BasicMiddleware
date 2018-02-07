@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
@@ -20,14 +21,23 @@ namespace Microsoft.AspNetCore.HostFiltering
     /// </summary>
     public class HostFilteringMiddleware
     {
+        private static readonly byte[] DefaultResponse = Encoding.ASCII.GetBytes(
+            "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\"\"http://www.w3.org/TR/html4/strict.dtd\">\r\n"
+            + "<HTML><HEAD><TITLE>Bad Request</TITLE>\r\n"
+            + "<META HTTP-EQUIV=\"Content-Type\" Content=\"text/html; charset=us-ascii\"></ HEAD >\r\n"
+            + "<BODY><h2>Bad Request - Invalid Hostname</h2>\r\n"
+            + "<hr><p>HTTP Error 400. The request hostname is invalid.</p>\r\n"
+            + "</BODY></HTML>");
+
         private readonly RequestDelegate _next;
         private readonly ILogger<HostFilteringMiddleware> _logger;
         private readonly HostFilteringOptions _options;
         private readonly IServerAddressesFeature _serverAddresses;
         private IList<string> _allowedHosts;
+        private bool? _allowAnyNonEmptyHost;
 
         /// <summary>
-        /// 
+        /// A middleware used to filter requests by their Host header.
         /// </summary>
         /// <param name="next"></param>
         /// <param name="serverAddresses"></param>
@@ -43,7 +53,7 @@ namespace Microsoft.AspNetCore.HostFiltering
         }
 
         /// <summary>
-        /// 
+        /// Runs the filtering
         /// </summary>
         /// <param name="context"></param>
         /// <returns></returns>
@@ -51,11 +61,11 @@ namespace Microsoft.AspNetCore.HostFiltering
         {
             EnsureConfigured();
 
-            if (!ValidateHost(context))
+            if (!CheckHost(context))
             {
                 context.Response.StatusCode = 400;
-                _logger.LogDebug("Request rejected due to incorrect host header.");
-                return Task.CompletedTask;
+                context.Response.ContentLength = DefaultResponse.Length;
+                return context.Response.Body.WriteAsync(DefaultResponse, 0, DefaultResponse.Length);
             }
 
             return _next(context);
@@ -63,26 +73,28 @@ namespace Microsoft.AspNetCore.HostFiltering
 
         private void EnsureConfigured()
         {
-            if (_allowedHosts?.Count > 0)
+            if (_allowAnyNonEmptyHost == true || _allowedHosts?.Count > 0)
             {
-                return;
-            }
-
-            if (_options.AllowedHosts?.Count > 0)
-            {
-                // TODO: Should we try to normalize the values? E.g. Punycode?
-                _allowedHosts = _options.AllowedHosts;
                 return;
             }
 
             var allowedHosts = new List<string>();
-            foreach (var address in _serverAddresses.Addresses)
+            if (_options.AllowedHosts?.Count > 0)
             {
-                // TODO: What about Punycode? Http.Sys requires you to register Unicode hosts.
-                var bindingAddress = BindingAddress.Parse(address);
-                if (!allowedHosts.Contains(bindingAddress.Host, StringComparer.OrdinalIgnoreCase))
+                if (!TryProcessHosts(_options.AllowedHosts, allowedHosts))
                 {
-                    allowedHosts.Add(bindingAddress.Host);
+                    _logger.LogDebug("Wildcard detected, all requests with hosts will be allowed.");
+                    _allowAnyNonEmptyHost = true;
+                    return;
+                }
+            }
+            else
+            {
+                if (!TryProcessHosts(_serverAddresses.Addresses.Select(address => BindingAddress.Parse(address).Host), allowedHosts))
+                {
+                    _logger.LogDebug("Wildcard detected, all requests with hosts will be allowed.");
+                    _allowAnyNonEmptyHost = true;
+                    return;
                 }
             }
 
@@ -91,11 +103,34 @@ namespace Microsoft.AspNetCore.HostFiltering
                 throw new InvalidOperationException("No allowed hosts were configured and none could be discovered from the server.");
             }
 
+            _logger.LogDebug("Allowed hosts: " + string.Join("; ", allowedHosts));
             _allowedHosts = allowedHosts;
         }
 
+        // returns false if any wildcards were found
+        private bool TryProcessHosts(IEnumerable<string> incoming, IList<string> resutls)
+        {
+            foreach (var host in incoming)
+            {
+                // TODO: What about Punycode? Http.Sys requires you to register Unicode hosts.
+                if (!resutls.Contains(host, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (string.Equals("*", host, StringComparison.Ordinal) // HttpSys wildcard
+                        || string.Equals("[::]", host, StringComparison.Ordinal) // Kestrel wildcard, IPv6 Any
+                        || string.Equals("0.0.0.0", host, StringComparison.Ordinal)) // IPv4 Any
+                    {
+                        return false;
+                    }
+
+                    resutls.Add(host);
+                }
+            }
+
+            return true;
+        }
+
         // This does not duplicate format validations that are expected to be performed by the host.
-        private bool ValidateHost(HttpContext context)
+        private bool CheckHost(HttpContext context)
         {
             StringSegment host = context.Request.Headers[HeaderNames.Host].ToString().Trim();
 
@@ -103,7 +138,21 @@ namespace Microsoft.AspNetCore.HostFiltering
             {
                 // Http/1.0 does not require the host header.
                 // Http/1.1 requires the header but the value may be empty.
-                return _options.AllowEmptyHosts;
+                if (!_options.AllowEmptyHosts)
+                {
+                    _logger.LogInformation($"{context.Request.Protocol} request rejected due to missing or empty host header.");
+                    return false;
+                }
+                if (_logger.IsEnabled(LogLevel.Debug))
+                {
+                    _logger.LogDebug($"{context.Request.Protocol} request allowed with missing or empty host header.");
+                }
+                return true;
+            }
+
+            if (_allowAnyNonEmptyHost == true)
+            {
+                return true;
             }
 
             // Drop the port
@@ -117,6 +166,7 @@ namespace Microsoft.AspNetCore.HostFiltering
                 if (endBracketIndex < 0)
                 {
                     // Invalid format
+                    _logger.LogInformation($"The host '{host}' has an invalid format.");
                     return false;
                 }
                 if (colonIndex < endBracketIndex)
@@ -147,11 +197,16 @@ namespace Microsoft.AspNetCore.HostFiltering
                     var hostRoot = host.Subsegment(host.Length - allowedRoot.Length, allowedRoot.Length);
                     if (hostRoot.Equals(allowedRoot, StringComparison.OrdinalIgnoreCase))
                     {
+                        if (_logger.IsEnabled(LogLevel.Debug))
+                        {
+                            _logger.LogDebug($"The host '{host}' matches the allowed subdomain wildcard '{allowedHost}'.");
+                        }
                         return true;
                     }
                 }
             }
 
+            _logger.LogInformation($"The host '{host}' does not match an allowed host.");
             return false;
         }
     }

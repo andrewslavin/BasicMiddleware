@@ -19,6 +19,7 @@ namespace HostFilteringSample
             var hostBuilder = new WebHostBuilder()
                 .ConfigureLogging((_, factory) =>
                 {
+                    factory.SetMinimumLevel(LogLevel.Debug);
                     factory.AddConsole();
                 })
                 .ConfigureAppConfiguration((hostingContext, config) =>
