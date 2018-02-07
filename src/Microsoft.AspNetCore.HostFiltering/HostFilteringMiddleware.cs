@@ -3,50 +3,43 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Http.Internal;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
 
 namespace Microsoft.AspNetCore.HostFiltering
 {
-    // A normal middleware would provide an options type, config binding, extension methods, etc..
-    // This intentionally does all of the work inside of the middleware so it can be
-    // easily copy-pasted into docs and other projects.
     /// <summary>
     /// 
     /// </summary>
     public class HostFilteringMiddleware
     {
         private readonly RequestDelegate _next;
-        private readonly IList<string> _hosts;
         private readonly ILogger<HostFilteringMiddleware> _logger;
+        private readonly HostFilteringOptions _options;
+        private readonly IServerAddressesFeature _serverAddresses;
+        private IList<string> _allowedHosts;
 
         /// <summary>
         /// 
         /// </summary>
         /// <param name="next"></param>
-        /// <param name="config"></param>
+        /// <param name="serverAddresses"></param>
         /// <param name="logger"></param>
-        public HostFilteringMiddleware(RequestDelegate next, IConfiguration config, ILogger<HostFilteringMiddleware> logger)
+        /// <param name="options"></param>
+        public HostFilteringMiddleware(RequestDelegate next, ILogger<HostFilteringMiddleware> logger, 
+            IOptions<HostFilteringOptions> options, IServerAddressesFeature serverAddresses)
         {
-            if (config == null)
-            {
-                throw new ArgumentNullException(nameof(config));
-            }
-
             _next = next ?? throw new ArgumentNullException(nameof(next));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-            // A semicolon separated list of host names without the port numbers.
-            // IPv6 addresses must use the bounding brackets and be in their normalized form.
-            _hosts = config["AllowedHosts"]?.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-            if (_hosts == null || _hosts.Count == 0)
-            {
-                throw new InvalidOperationException("No configuration entry found for AllowedHosts");
-            }
+            _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+            _serverAddresses = serverAddresses ?? throw new ArgumentNullException(nameof(serverAddresses));
         }
 
         /// <summary>
@@ -56,6 +49,8 @@ namespace Microsoft.AspNetCore.HostFiltering
         /// <returns></returns>
         public Task Invoke(HttpContext context)
         {
+            EnsureConfigured();
+
             if (!ValidateHost(context))
             {
                 context.Response.StatusCode = 400;
@@ -64,6 +59,39 @@ namespace Microsoft.AspNetCore.HostFiltering
             }
 
             return _next(context);
+        }
+
+        private void EnsureConfigured()
+        {
+            if (_allowedHosts?.Count > 0)
+            {
+                return;
+            }
+
+            if (_options.AllowedHosts?.Count > 0)
+            {
+                // TODO: Should we try to normalize the values? E.g. Punycode?
+                _allowedHosts = _options.AllowedHosts;
+                return;
+            }
+
+            var allowedHosts = new List<string>();
+            foreach (var address in _serverAddresses.Addresses)
+            {
+                // TODO: What about Punycode? Http.Sys requires you to register Unicode hosts.
+                var bindingAddress = BindingAddress.Parse(address);
+                if (!allowedHosts.Contains(bindingAddress.Host, StringComparer.OrdinalIgnoreCase))
+                {
+                    allowedHosts.Add(bindingAddress.Host);
+                }
+            }
+
+            if (allowedHosts.Count == 0)
+            {
+                throw new InvalidOperationException("No allowed hosts were configured and none could be discovered from the server.");
+            }
+
+            _allowedHosts = allowedHosts;
         }
 
         // This does not duplicate format validations that are expected to be performed by the host.
@@ -75,7 +103,7 @@ namespace Microsoft.AspNetCore.HostFiltering
             {
                 // Http/1.0 does not require the host header.
                 // Http/1.1 requires the header but the value may be empty.
-                return true;
+                return _options.AllowEmptyHosts;
             }
 
             // Drop the port
@@ -103,7 +131,7 @@ namespace Microsoft.AspNetCore.HostFiltering
                 host = host.Subsegment(0, colonIndex);
             }
 
-            foreach (var allowedHost in _hosts)
+            foreach (var allowedHost in _allowedHosts)
             {
                 if (StringSegment.Equals(allowedHost, host, StringComparison.OrdinalIgnoreCase))
                 {
