@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -110,9 +111,15 @@ namespace Microsoft.AspNetCore.HostFiltering
         // returns false if any wildcards were found
         private bool TryProcessHosts(IEnumerable<string> incoming, IList<string> resutls)
         {
-            foreach (var host in incoming)
+            foreach (var entry in incoming)
             {
-                // TODO: What about Punycode? Http.Sys requires you to register Unicode hosts.
+                var host = entry;
+                if (ContainsNonAscii(host))
+                {
+                    // Punycode. Http.Sys requires you to register Unicode hosts, but the headers contain punycode.
+                    host = new IdnMapping().GetAscii(host);
+                }
+
                 if (!resutls.Contains(host, StringComparer.OrdinalIgnoreCase))
                 {
                     if (string.Equals("*", host, StringComparison.Ordinal) // HttpSys wildcard
@@ -129,10 +136,22 @@ namespace Microsoft.AspNetCore.HostFiltering
             return true;
         }
 
+        private bool ContainsNonAscii(string host)
+        {
+            foreach (var ch in host)
+            {
+                if (ch > 127)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // This does not duplicate format validations that are expected to be performed by the host.
         private bool CheckHost(HttpContext context)
         {
-            StringSegment host = context.Request.Headers[HeaderNames.Host].ToString().Trim();
+            var host = new StringSegment(context.Request.Headers[HeaderNames.Host].ToString()).Trim();
 
             if (StringSegment.IsNullOrEmpty(host))
             {
@@ -192,9 +211,9 @@ namespace Microsoft.AspNetCore.HostFiltering
                 if (allowedHost.StartsWith("*.", StringComparison.Ordinal) && host.Length >= allowedHost.Length)
                 {
                     // .example.com
-                    var allowedRoot = new StringSegment(allowedHost, 1, allowedHost.Length - 1);
+                    var allowedRoot = new StringSegment(allowedHost).Subsegment(1);
 
-                    var hostRoot = host.Subsegment(host.Length - allowedRoot.Length, allowedRoot.Length);
+                    var hostRoot = host.Subsegment(host.Length - allowedRoot.Length);
                     if (hostRoot.Equals(allowedRoot, StringComparison.OrdinalIgnoreCase))
                     {
                         if (_logger.IsEnabled(LogLevel.Debug))
