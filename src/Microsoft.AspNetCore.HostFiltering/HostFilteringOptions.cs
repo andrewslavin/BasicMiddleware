@@ -16,12 +16,11 @@ namespace Microsoft.AspNetCore.HostFiltering
         /// The hosts headers that are allowed to access this site. At least one value is required.
         /// </summary>
         /// <remarks>
-        /// Considerations:
-        /// - Port numbers should be excluded
-        /// - A top level wildcard "*" allows all non-empty hosts. // TODO:
-        /// - Subdomain wildcards are permitted. E.g. "*.example.com" matches only subdomains of example.com,
-        ///    but not the parent domain.
-        /// - Unicode host names should use their encoded punycode format // TODO:
+        /// - Port numbers must be excluded
+        /// - A top level wildcard "*" allows all non-empty hosts.
+        /// - Subdomain wildcards are permitted. E.g. "*.example.com" matches subdomains like foo.example.com,
+        ///    but not the parent domain example.com.
+        /// - Unicode host names are allowed but will be converted to punycode for matching.
         /// - IPv6 addresses must include their bounding brackets and be in their normalized form.
         /// </remarks>
         public IList<string> AllowedHosts { get; set; } = new List<string>();

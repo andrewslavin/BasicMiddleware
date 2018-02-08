@@ -2,6 +2,8 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Runtime.CompilerServices;
@@ -11,6 +13,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
 
 namespace Microsoft.AspNetCore.HttpOverrides
 {
@@ -22,6 +25,8 @@ namespace Microsoft.AspNetCore.HttpOverrides
         private readonly ForwardedHeadersOptions _options;
         private readonly RequestDelegate _next;
         private readonly ILogger _logger;
+        private bool _allowAllHosts;
+        private IList<string> _allowedHosts;
 
         static ForwardedHeadersMiddleware()
         {
@@ -85,6 +90,8 @@ namespace Microsoft.AspNetCore.HttpOverrides
             _options = options.Value;
             _logger = loggerFactory.CreateLogger<ForwardedHeadersMiddleware>();
             _next = next;
+
+            PreProcessHosts();
         }
 
         private static void EnsureOptionNotNullorWhitespace(string value, string propertyName)
@@ -93,6 +100,53 @@ namespace Microsoft.AspNetCore.HttpOverrides
             {
                 throw new ArgumentException($"options.{propertyName} is required", "options");
             }
+        }
+
+        private void PreProcessHosts()
+        {
+            if (_options.AllowedHosts == null || _options.AllowedHosts.Count == 0)
+            {
+                _allowAllHosts = true;
+                return;
+            }
+
+            var allowedHosts = new List<string>();
+            foreach (var entry in _options.AllowedHosts)
+            {
+                var host = entry;
+                if (ContainsNonAscii(host))
+                {
+                    // Punycode. The user may input Unicode but the headers contain punycode.
+                    host = new IdnMapping().GetAscii(host);
+                }
+
+                if (!allowedHosts.Contains(host, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (string.Equals("*", host, StringComparison.Ordinal) // HttpSys wildcard
+                        || string.Equals("[::]", host, StringComparison.Ordinal) // Kestrel wildcard, IPv6 Any
+                        || string.Equals("0.0.0.0", host, StringComparison.Ordinal)) // IPv4 Any
+                    {
+                        _allowAllHosts = true;
+                        return;
+                    }
+
+                    allowedHosts.Add(host);
+                }
+            }
+
+            _allowedHosts = allowedHosts;
+        }
+
+        private bool ContainsNonAscii(string host)
+        {
+            foreach (var ch in host)
+            {
+                if (ch > 127)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public Task Invoke(HttpContext context)
@@ -231,7 +285,8 @@ namespace Microsoft.AspNetCore.HttpOverrides
 
                 if (checkHost)
                 {
-                    if (!string.IsNullOrEmpty(set.Host) && TryValidateHost(set.Host))
+                    if (!string.IsNullOrEmpty(set.Host) && TryValidateHost(set.Host)
+                        && (_allowAllHosts || CheckAllowedHost(set.Host)))
                     {
                         applyChanges = true;
                         currentValues.Host = set.Host;
@@ -316,6 +371,62 @@ namespace Microsoft.AspNetCore.HttpOverrides
                     return true;
                 }
             }
+            return false;
+        }
+
+        // TODO: Much of this logic could be moved to HostString
+        private bool CheckAllowedHost(StringSegment host)
+        {
+            var colonIndex = host.LastIndexOf(':');
+
+            // IPv6 special case
+            if (host.StartsWith("[", StringComparison.Ordinal))
+            {
+                var endBracketIndex = host.IndexOf(']');
+                if (endBracketIndex < 0)
+                {
+                    // Invalid format
+                    _logger.LogInformation($"The host '{host}' has an invalid format.");
+                    return false;
+                }
+                if (colonIndex < endBracketIndex)
+                {
+                    // No port, just the IPv6 Host
+                    colonIndex = -1;
+                }
+            }
+
+            if (colonIndex > 0)
+            {
+                host = host.Subsegment(0, colonIndex);
+            }
+
+            foreach (var allowedHost in _allowedHosts)
+            {
+                if (StringSegment.Equals(allowedHost, host, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                // Sub-domain wildcards: *.example.com
+                if (allowedHost.StartsWith("*.", StringComparison.Ordinal) && host.Length >= allowedHost.Length)
+                {
+                    // .example.com
+                    var allowedRoot = new StringSegment(allowedHost).Subsegment(1);
+
+                    var hostRoot = host.Subsegment(host.Length - allowedRoot.Length);
+                    if (hostRoot.Equals(allowedRoot, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (_logger.IsEnabled(LogLevel.Debug))
+                        {
+                            _logger.LogDebug($"The host '{host}' matches the allowed subdomain wildcard '{allowedHost}'.");
+                        }
+                        return true;
+                    }
+                }
+            }
+
+            _logger.LogInformation($"The host '{host}' does not match an allowed host.");
             return false;
         }
 
