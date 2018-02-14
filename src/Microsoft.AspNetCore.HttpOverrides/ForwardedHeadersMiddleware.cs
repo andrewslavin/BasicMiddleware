@@ -113,12 +113,8 @@ namespace Microsoft.AspNetCore.HttpOverrides
             var allowedHosts = new List<string>();
             foreach (var entry in _options.AllowedHosts)
             {
-                var host = entry;
-                if (ContainsNonAscii(host))
-                {
-                    // Punycode. The user may input Unicode but the headers contain punycode.
-                    host = new IdnMapping().GetAscii(host);
-                }
+                // Punycode. Http.Sys requires you to register Unicode hosts, but the headers contain punycode.
+                var host = new HostString(entry).ToUriComponent();
 
                 if (!allowedHosts.Contains(host, StringComparer.OrdinalIgnoreCase))
                 {
@@ -135,18 +131,6 @@ namespace Microsoft.AspNetCore.HttpOverrides
             }
 
             _allowedHosts = allowedHosts;
-        }
-
-        private bool ContainsNonAscii(string host)
-        {
-            foreach (var ch in host)
-            {
-                if (ch > 127)
-                {
-                    return true;
-                }
-            }
-            return false;
         }
 
         public Task Invoke(HttpContext context)

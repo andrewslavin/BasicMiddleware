@@ -23,7 +23,8 @@ namespace HostFilteringSample
         {
             services.AddHostFiltering(options =>
             {
-                // options.AllowedHosts = Config["AllowedHosts"]?.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                // If this is excluded then it will fall back to the server's addresses
+                options.AllowedHosts = Config["AllowedHosts"]?.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
             });
         }
 

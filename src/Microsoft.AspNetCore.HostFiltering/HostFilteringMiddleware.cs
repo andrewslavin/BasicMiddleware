@@ -22,6 +22,7 @@ namespace Microsoft.AspNetCore.HostFiltering
     /// </summary>
     public class HostFilteringMiddleware
     {
+        // Matches Http.Sys. TODO: Make overrideable / optional?
         private static readonly byte[] DefaultResponse = Encoding.ASCII.GetBytes(
             "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\"\"http://www.w3.org/TR/html4/strict.dtd\">\r\n"
             + "<HTML><HEAD><TITLE>Bad Request</TITLE>\r\n"
@@ -61,6 +62,10 @@ namespace Microsoft.AspNetCore.HostFiltering
         public Task Invoke(HttpContext context)
         {
             EnsureConfigured();
+
+            // TODO: Bypass this middleware if the IHostFilteredFeature.IsHostFiltered == true.
+            //  IISIntegration will set this under the assumption that this is IIS's responsibility.
+            //  Add an IISOption to disable it.
 
             if (!CheckHost(context))
             {
@@ -113,12 +118,8 @@ namespace Microsoft.AspNetCore.HostFiltering
         {
             foreach (var entry in incoming)
             {
-                var host = entry;
-                if (ContainsNonAscii(host))
-                {
-                    // Punycode. Http.Sys requires you to register Unicode hosts, but the headers contain punycode.
-                    host = new IdnMapping().GetAscii(host);
-                }
+                // Punycode. Http.Sys requires you to register Unicode hosts, but the headers contain punycode.
+                var host = new HostString(entry).ToUriComponent();
 
                 if (!resutls.Contains(host, StringComparer.OrdinalIgnoreCase))
                 {
@@ -134,18 +135,6 @@ namespace Microsoft.AspNetCore.HostFiltering
             }
 
             return true;
-        }
-
-        private bool ContainsNonAscii(string host)
-        {
-            foreach (var ch in host)
-            {
-                if (ch > 127)
-                {
-                    return true;
-                }
-            }
-            return false;
         }
 
         // This does not duplicate format validations that are expected to be performed by the host.
@@ -174,10 +163,20 @@ namespace Microsoft.AspNetCore.HostFiltering
                 return true;
             }
 
+            /*
+            if (HostString.MatchesAny(host, _allowedHosts))
+            {
+                _logger.LogTrace($"The host '{host}' matches an allowed host.");
+                return true;
+            }
+            
+            _logger.LogInformation($"The host '{host}' does not match an allowed host.");
+            return false;
+            */
+
             // Drop the port
 
             var colonIndex = host.LastIndexOf(':');
-
             // IPv6 special case
             if (host.StartsWith("[", StringComparison.Ordinal))
             {
