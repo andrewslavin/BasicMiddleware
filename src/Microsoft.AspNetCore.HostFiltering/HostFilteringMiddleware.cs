@@ -62,10 +62,6 @@ namespace Microsoft.AspNetCore.HostFiltering
         {
             EnsureConfigured();
 
-            // TODO: Bypass this middleware if the IHostFilteredFeature.IsHostFiltered == true.
-            //  IISIntegration will set this under the assumption that this is IIS's responsibility.
-            //  Add an IISOption to disable it.
-
             if (!CheckHost(context))
             {
                 context.Response.StatusCode = 400;

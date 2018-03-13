@@ -26,8 +26,6 @@ namespace Microsoft.AspNetCore.Builder
                 throw new ArgumentNullException(nameof(app));
             }
 
-            // TODO: Check for the new IReverseProxyFeature in ServerFeatures to see if the middleware should be added at all.
-
             app.UseMiddleware<HostFilteringMiddleware>(app.ServerFeatures.Get<IServerAddressesFeature>()
                 ?? new EmptyServerAddresses());
 
