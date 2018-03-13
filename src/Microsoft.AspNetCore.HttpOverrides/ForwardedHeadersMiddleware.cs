@@ -26,7 +26,7 @@ namespace Microsoft.AspNetCore.HttpOverrides
         private readonly RequestDelegate _next;
         private readonly ILogger _logger;
         private bool _allowAllHosts;
-        private IList<string> _allowedHosts;
+        private IList<StringSegment> _allowedHosts;
 
         static ForwardedHeadersMiddleware()
         {
@@ -110,13 +110,13 @@ namespace Microsoft.AspNetCore.HttpOverrides
                 return;
             }
 
-            var allowedHosts = new List<string>();
+            var allowedHosts = new List<StringSegment>();
             foreach (var entry in _options.AllowedHosts)
             {
                 // Punycode. Http.Sys requires you to register Unicode hosts, but the headers contain punycode.
                 var host = new HostString(entry).ToUriComponent();
 
-                if (!allowedHosts.Contains(host, StringComparer.OrdinalIgnoreCase))
+                if (!allowedHosts.Contains(host, StringSegmentComparer.OrdinalIgnoreCase))
                 {
                     if (string.Equals("*", host, StringComparison.Ordinal) // HttpSys wildcard
                         || string.Equals("[::]", host, StringComparison.Ordinal) // Kestrel wildcard, IPv6 Any
@@ -270,7 +270,7 @@ namespace Microsoft.AspNetCore.HttpOverrides
                 if (checkHost)
                 {
                     if (!string.IsNullOrEmpty(set.Host) && TryValidateHost(set.Host)
-                        && (_allowAllHosts || CheckAllowedHost(set.Host)))
+                        && (_allowAllHosts || HostString.MatchesAny(set.Host, _allowedHosts)))
                     {
                         applyChanges = true;
                         currentValues.Host = set.Host;
@@ -355,62 +355,6 @@ namespace Microsoft.AspNetCore.HttpOverrides
                     return true;
                 }
             }
-            return false;
-        }
-
-        // TODO: Much of this logic could be moved to HostString
-        private bool CheckAllowedHost(StringSegment host)
-        {
-            var colonIndex = host.LastIndexOf(':');
-
-            // IPv6 special case
-            if (host.StartsWith("[", StringComparison.Ordinal))
-            {
-                var endBracketIndex = host.IndexOf(']');
-                if (endBracketIndex < 0)
-                {
-                    // Invalid format
-                    _logger.LogInformation($"The host '{host}' has an invalid format.");
-                    return false;
-                }
-                if (colonIndex < endBracketIndex)
-                {
-                    // No port, just the IPv6 Host
-                    colonIndex = -1;
-                }
-            }
-
-            if (colonIndex > 0)
-            {
-                host = host.Subsegment(0, colonIndex);
-            }
-
-            foreach (var allowedHost in _allowedHosts)
-            {
-                if (StringSegment.Equals(allowedHost, host, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                // Sub-domain wildcards: *.example.com
-                if (allowedHost.StartsWith("*.", StringComparison.Ordinal) && host.Length >= allowedHost.Length)
-                {
-                    // .example.com
-                    var allowedRoot = new StringSegment(allowedHost).Subsegment(1);
-
-                    var hostRoot = host.Subsegment(host.Length - allowedRoot.Length);
-                    if (hostRoot.Equals(allowedRoot, StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (_logger.IsEnabled(LogLevel.Debug))
-                        {
-                            _logger.LogDebug($"The host '{host}' matches the allowed subdomain wildcard '{allowedHost}'.");
-                        }
-                        return true;
-                    }
-                }
-            }
-
-            _logger.LogInformation($"The host '{host}' does not match an allowed host.");
             return false;
         }
 
