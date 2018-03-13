@@ -1,9 +1,7 @@
 ﻿// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
-using System;
 using System.Collections.Generic;
-using System.Text;
 
 namespace Microsoft.AspNetCore.HostFiltering
 {
@@ -29,9 +27,16 @@ namespace Microsoft.AspNetCore.HostFiltering
         /// Indicates if requests without hosts are allowed. The default is true.
         /// </summary>
         /// <remarks>
-        /// HTTP/1.0 does not require host header.
+        /// HTTP/1.0 does not require a host header.
         /// Http/1.1 requires a host header, but says the value may be empty.
         /// </remarks>
         public bool AllowEmptyHosts { get; set; } = true;
+
+        // Note if this were disabled then things like the status code middleware may try to re-execute
+        // the request. This is a low level protocol violation, pretty error pages should not be required.
+        /// <summary>
+        /// Indicates if the 400 response should include a default message or be empty. This is enabled by default.
+        /// </summary>
+        public bool IncludedFailureMessage { get; set; } = true;
     }
 }

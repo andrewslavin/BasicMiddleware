@@ -3,7 +3,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -18,11 +17,11 @@ using Microsoft.Net.Http.Headers;
 namespace Microsoft.AspNetCore.HostFiltering
 {
     /// <summary>
-    /// 
+    /// A middleware used to filter requests by their Host header.
     /// </summary>
     public class HostFilteringMiddleware
     {
-        // Matches Http.Sys. TODO: Make overrideable / optional?
+        // Matches Http.Sys.
         private static readonly byte[] DefaultResponse = Encoding.ASCII.GetBytes(
             "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\"\"http://www.w3.org/TR/html4/strict.dtd\">\r\n"
             + "<HTML><HEAD><TITLE>Bad Request</TITLE>\r\n"
@@ -70,8 +69,12 @@ namespace Microsoft.AspNetCore.HostFiltering
             if (!CheckHost(context))
             {
                 context.Response.StatusCode = 400;
-                context.Response.ContentLength = DefaultResponse.Length;
-                return context.Response.Body.WriteAsync(DefaultResponse, 0, DefaultResponse.Length);
+                if (_options.IncludedFailureMessage)
+                {
+                    context.Response.ContentLength = DefaultResponse.Length;
+                    return context.Response.Body.WriteAsync(DefaultResponse, 0, DefaultResponse.Length);
+                }
+                return Task.CompletedTask;
             }
 
             return _next(context);
