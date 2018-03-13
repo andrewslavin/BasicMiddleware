@@ -35,7 +35,7 @@ namespace Microsoft.AspNetCore.HostFiltering
         private readonly ILogger<HostFilteringMiddleware> _logger;
         private readonly HostFilteringOptions _options;
         private readonly IServerAddressesFeature _serverAddresses;
-        private IList<string> _allowedHosts;
+        private IList<StringSegment> _allowedHosts;
         private bool? _allowAnyNonEmptyHost;
 
         /// <summary>
@@ -84,7 +84,7 @@ namespace Microsoft.AspNetCore.HostFiltering
                 return;
             }
 
-            var allowedHosts = new List<string>();
+            var allowedHosts = new List<StringSegment>();
             if (_options.AllowedHosts?.Count > 0)
             {
                 if (!TryProcessHosts(_options.AllowedHosts, allowedHosts))
@@ -114,14 +114,14 @@ namespace Microsoft.AspNetCore.HostFiltering
         }
 
         // returns false if any wildcards were found
-        private bool TryProcessHosts(IEnumerable<string> incoming, IList<string> resutls)
+        private bool TryProcessHosts(IEnumerable<string> incoming, IList<StringSegment> results)
         {
             foreach (var entry in incoming)
             {
                 // Punycode. Http.Sys requires you to register Unicode hosts, but the headers contain punycode.
                 var host = new HostString(entry).ToUriComponent();
 
-                if (!resutls.Contains(host, StringComparer.OrdinalIgnoreCase))
+                if (!results.Contains(host, StringSegmentComparer.OrdinalIgnoreCase))
                 {
                     if (string.Equals("*", host, StringComparison.Ordinal) // HttpSys wildcard
                         || string.Equals("[::]", host, StringComparison.Ordinal) // Kestrel wildcard, IPv6 Any
@@ -130,7 +130,7 @@ namespace Microsoft.AspNetCore.HostFiltering
                         return false;
                     }
 
-                    resutls.Add(host);
+                    results.Add(host);
                 }
             }
 
@@ -163,67 +163,12 @@ namespace Microsoft.AspNetCore.HostFiltering
                 return true;
             }
 
-            /*
             if (HostString.MatchesAny(host, _allowedHosts))
             {
                 _logger.LogTrace($"The host '{host}' matches an allowed host.");
                 return true;
             }
             
-            _logger.LogInformation($"The host '{host}' does not match an allowed host.");
-            return false;
-            */
-
-            // Drop the port
-
-            var colonIndex = host.LastIndexOf(':');
-            // IPv6 special case
-            if (host.StartsWith("[", StringComparison.Ordinal))
-            {
-                var endBracketIndex = host.IndexOf(']');
-                if (endBracketIndex < 0)
-                {
-                    // Invalid format
-                    _logger.LogInformation($"The host '{host}' has an invalid format.");
-                    return false;
-                }
-                if (colonIndex < endBracketIndex)
-                {
-                    // No port, just the IPv6 Host
-                    colonIndex = -1;
-                }
-            }
-
-            if (colonIndex > 0)
-            {
-                host = host.Subsegment(0, colonIndex);
-            }
-
-            foreach (var allowedHost in _allowedHosts)
-            {
-                if (StringSegment.Equals(allowedHost, host, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                // Sub-domain wildcards: *.example.com
-                if (allowedHost.StartsWith("*.", StringComparison.Ordinal) && host.Length >= allowedHost.Length)
-                {
-                    // .example.com
-                    var allowedRoot = new StringSegment(allowedHost).Subsegment(1);
-
-                    var hostRoot = host.Subsegment(host.Length - allowedRoot.Length);
-                    if (hostRoot.Equals(allowedRoot, StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (_logger.IsEnabled(LogLevel.Debug))
-                        {
-                            _logger.LogDebug($"The host '{host}' matches the allowed subdomain wildcard '{allowedHost}'.");
-                        }
-                        return true;
-                    }
-                }
-            }
-
             _logger.LogInformation($"The host '{host}' does not match an allowed host.");
             return false;
         }
